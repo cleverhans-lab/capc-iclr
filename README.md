@@ -2,6 +2,8 @@
 
 Confidential And Private Collaborative Machine Learning
 
+Paper: https://openreview.net/forum?id=h2EbJ4_wMVq
+
 We develop a protocol involving a small number of parties (e.g., a few hospitals) who want to improve the utility of their respective models via collaboration, and a third party Content Service Provider (CSP). Each hospital first trains its own model on its local dataset. We assume all parties. The CSP generates a pair of secret and public keys for an additive homomorphic encryption scheme and sends the public key to all collaborating parties. Once a party identified a query they would like a label for, they initiate the collaboration protocol.
 
 
