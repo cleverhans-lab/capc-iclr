@@ -41,23 +41,75 @@ def _log1mexp(x):
         return -np.inf
 
 
+# def rdp_to_dp(orders, rdp_eps, delta):
+#     """
+#     Conversion from (lambda, eps)-RDP to conventional (eps, delta)-DP.
+#
+#     Args:
+#         orders: an array-like list of RDP orders.
+#         rdp_eps: an array-like list of RDP guarantees (of the same length as orders).
+#         delta: target delta (a scalar).
+#
+#     Returns:
+#         A pair of (dp_eps, optimal_order).
+#     """
+#     assert not np.isscalar(orders) and not np.isscalar(rdp_eps) and len(
+#         orders) == len(
+#         rdp_eps), "'orders' and 'rdp_eps' must be array-like and of the same length!"
+#     dp_eps = np.array(rdp_eps) - math.log(delta) / (np.array(orders) - 1)
+#     idx_opt = np.argmin(dp_eps)
+#     return dp_eps[idx_opt], orders[idx_opt]
+
+
 def rdp_to_dp(orders, rdp_eps, delta):
     """
     Conversion from (lambda, eps)-RDP to conventional (eps, delta)-DP.
 
     Args:
-        orders: an array-like list of RDP orders.
-        rdp_eps: an array-like list of RDP guarantees (of the same length as orders).
-        delta: target delta (a scalar).
-
+      orders: An array (or a scalar) of RDP orders.
+      rdp_eps: A list (or a scalar) of RDP guarantees.
+      delta: The target delta.
     Returns:
-        A pair of (dp_eps, optimal_order).
+      Pair of (dp_eps, optimal_order).
+    Raises:
+      ValueError: If input is malformed.
     """
-    assert not np.isscalar(orders) and not np.isscalar(rdp_eps) and len(orders) == len(
-        rdp_eps), "'orders' and 'rdp_eps' must be array-like and of the same length!"
-    dp_eps = np.array(rdp_eps) - math.log(delta) / (np.array(orders) - 1)
-    idx_opt = np.argmin(dp_eps)
-    return dp_eps[idx_opt], orders[idx_opt]
+    orders_vec = np.atleast_1d(orders)
+    rdp_vec = np.atleast_1d(rdp_eps)
+
+    if delta <= 0:
+        raise ValueError("Privacy failure probability bound delta must be >0.")
+    if len(orders_vec) != len(rdp_vec):
+        raise ValueError("Input lists must have the same length.")
+
+    # Basic bound (see https://arxiv.org/abs/1702.07476 Proposition 3 in v3):
+    #   eps = min( rdp_vec - math.log(delta) / (orders_vec - 1) )
+
+    # Improved bound from https://arxiv.org/abs/2004.00010 Proposition 12 (in v4).
+    # Also appears in https://arxiv.org/abs/2001.05990 Equation 20 (in v1).
+    eps_vec = []
+    for (a, r) in zip(orders_vec, rdp_vec):
+        if a < 1:
+            raise ValueError("Renyi divergence order must be >=1.")
+    if r < 0:
+        raise ValueError("Renyi divergence must be >=0.")
+
+    if delta ** 2 + math.expm1(-r) >= 0:
+        # In this case, we can simply bound via KL divergence:
+        # delta <= sqrt(1-exp(-KL)).
+        eps = 0  # No need to try further computation if we have eps = 0.
+    elif a > 1.01:
+        # This bound is not numerically stable as alpha->1.
+        # Thus we have a min value of alpha.
+        # The bound is also not useful for small alpha, so doesn't matter.
+        eps = r + math.log1p(-1 / a) - math.log(delta * a) / (a - 1)
+    else:
+        # In this case we can't do anything. E.g., asking for delta = 0.
+        eps = np.inf
+    eps_vec.append(eps)
+
+    idx_opt = np.argmin(eps_vec)
+    return max(0, eps_vec[idx_opt]), orders_vec[idx_opt]
 
 
 ###############################
@@ -82,8 +134,10 @@ def compute_logq_gnmax(votes, sigma):
     votes_gap = votes[idx_max] - votes
     votes_gap = votes_gap[np.arange(num_classes) != idx_max]  # exclude argmax
     # Upper bound log(q) via a union bound.
-    logq = _logsumexp(scipy.stats.norm.logsf(votes_gap, scale=math.sqrt(2 * variance)))
-    return min(logq, math.log(1 - (1 / num_classes)))  # another obvious upper bound
+    logq = _logsumexp(
+        scipy.stats.norm.logsf(votes_gap, scale=math.sqrt(2 * variance)))
+    return min(logq,
+               math.log(1 - (1 / num_classes)))  # another obvious upper bound
 
 
 def compute_rdp_data_independent_gnmax(sigma, orders):
@@ -101,7 +155,8 @@ def compute_rdp_data_independent_gnmax(sigma, orders):
         ValueError: if the inputs are invalid.
     """
     if sigma < 0 or np.isscalar(orders) or np.any(orders <= 1):
-        raise ValueError("'sigma' must be non-negative, 'orders' must be array-like, and all elements in 'orders' must be greater than 1!")
+        raise ValueError(
+            "'sigma' must be non-negative, 'orders' must be array-like, and all elements in 'orders' must be greater than 1!")
     variance = sigma ** 2
     return np.array(orders) / variance
 
@@ -147,12 +202,12 @@ def compute_rdp_data_dependent_gnmax(logq, sigma, orders):
 
     # Make sure that logq lies in the increasing range and that A is positive.
     if (np.any(mask) and -logq > rdp_eps2 and logq <= log_a2 - rdp_order2 *
-            (math.log(1 + 1 / (rdp_order1 - 1)) + math.log(1 + 1 / (rdp_order2 - 1)))):
-
+            (math.log(1 + 1 / (rdp_order1 - 1)) + math.log(
+                1 + 1 / (rdp_order2 - 1)))):
         # Use log1p(x) = log(1 + x) to avoid catastrophic cancellations when x ~ 0.
         log1mq = _log1mexp(logq)  # log1mq = log(1-q)
         log_a = (orders - 1) * (
-            log1mq - _log1mexp((logq + rdp_eps2) * (1 - 1 / rdp_order2)))
+                log1mq - _log1mexp((logq + rdp_eps2) * (1 - 1 / rdp_order2)))
         log_b = (orders - 1) * (rdp_eps1 - logq / (rdp_order1 - 1))
 
         # Use logaddexp(x, y) = log(e^x + e^y) to avoid overflow for large x, y.
@@ -163,7 +218,8 @@ def compute_rdp_data_dependent_gnmax(logq, sigma, orders):
     return rdp_eps
 
 
-def is_data_independent_rdp_always_opt_gnmax(num_teachers, num_classes, sigma, orders):
+def is_data_independent_rdp_always_opt_gnmax(num_teachers, num_classes, sigma,
+                                             orders):
     """
     Tests whether data-independent bound is always optimal for the GNMax mechanism.
 
@@ -244,7 +300,8 @@ def compute_rdp_data_dependent_threshold(logpr, sigma, orders):
     return compute_rdp_data_dependent_gnmax(logq, 2 ** .5 * sigma, orders)
 
 
-def is_data_independent_rdp_always_opt_threshold(num_teachers, t, sigma, orders):
+def is_data_independent_rdp_always_opt_threshold(num_teachers, t, sigma,
+                                                 orders):
     """
     Tests whether data-independent bound is always optimal for the threshold mechanism.
 
@@ -269,8 +326,8 @@ def is_data_independent_rdp_always_opt_threshold(num_teachers, t, sigma, orders)
     rdp_eps_dep2 = compute_rdp_data_dependent_threshold(logpr2, sigma, orders)
 
     rdp_eps_ind = compute_rdp_data_independent_threshold(sigma, orders)
-    return np.logical_and(np.isclose(rdp_eps_dep1, rdp_eps_ind), np.isclose(rdp_eps_dep2, rdp_eps_ind))
-
+    return np.logical_and(np.isclose(rdp_eps_dep1, rdp_eps_ind),
+                          np.isclose(rdp_eps_dep2, rdp_eps_ind))
 
 # if __name__ == "__main__":
 #     num_teachers = 250
