@@ -91,22 +91,22 @@ def rdp_to_dp(orders, rdp_eps, delta):
     for (a, r) in zip(orders_vec, rdp_vec):
         if a < 1:
             raise ValueError("Renyi divergence order must be >=1.")
-    if r < 0:
-        raise ValueError("Renyi divergence must be >=0.")
+        if r < 0:
+            raise ValueError("Renyi divergence must be >=0.")
 
-    if delta ** 2 + math.expm1(-r) >= 0:
-        # In this case, we can simply bound via KL divergence:
-        # delta <= sqrt(1-exp(-KL)).
-        eps = 0  # No need to try further computation if we have eps = 0.
-    elif a > 1.01:
-        # This bound is not numerically stable as alpha->1.
-        # Thus we have a min value of alpha.
-        # The bound is also not useful for small alpha, so doesn't matter.
-        eps = r + math.log1p(-1 / a) - math.log(delta * a) / (a - 1)
-    else:
-        # In this case we can't do anything. E.g., asking for delta = 0.
-        eps = np.inf
-    eps_vec.append(eps)
+        if delta ** 2 + math.expm1(-r) >= 0:
+            # In this case, we can simply bound via KL divergence:
+            # delta <= sqrt(1-exp(-KL)).
+            eps = 0  # No need to try further computation if we have eps = 0.
+        elif a > 1.01:
+            # This bound is not numerically stable as alpha->1.
+            # Thus we have a min value of alpha.
+            # The bound is also not useful for small alpha, so doesn't matter.
+            eps = r + math.log1p(-1 / a) - math.log(delta * a) / (a - 1)
+        else:
+            # In this case we can't do anything. E.g., asking for delta = 0.
+            eps = np.inf
+        eps_vec.append(eps)
 
     idx_opt = np.argmin(eps_vec)
     return max(0, eps_vec[idx_opt]), orders_vec[idx_opt]
